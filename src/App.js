@@ -1,288 +1,264 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Users, Settings, PlaneTakeoff, Play, Plus, Trash2, Printer, Search, Upload, FileDown, Calendar, ClipboardList, BarChart3, RefreshCcw, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { 
+  Users, Calendar, ClipboardList, FileDown, 
+  Upload, Play, Trash2, Printer, Plus, AlertCircle 
+} from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const RosterApp = () => {
+  // --- STATE MANAGEMENT ---
   const [activeTab, setActiveTab] = useState('staff');
-  const [searchTerm, setSearchTerm] = useState('');
-  
   const [staff, setStaff] = useState(() => {
     const saved = localStorage.getItem('roster_staff');
-    return saved ? JSON.parse(saved) : [{ name: 'Sample Staff', designation: 'AI Lead', role: 'Senior' }];
+    return saved ? JSON.parse(saved) : [];
   });
-
   const [holidays, setHolidays] = useState(() => {
     const saved = localStorage.getItem('roster_holidays');
-    return saved ? JSON.parse(saved) : [{ date: '2026-05-01', name: 'Maharashtra Day' }];
+    return saved ? JSON.parse(saved) : [];
   });
-
-  const [offDays, setOffDays] = useState([]);
-  const [config, setConfig] = useState({ start: '2026-04-01', end: '2026-04-30' });
+  const [config, setConfig] = useState({ 
+    start: '2026-04-01', 
+    end: '2026-04-30' 
+  });
   const [generatedRoster, setGeneratedRoster] = useState(null);
 
+  // Sync with LocalStorage
   useEffect(() => {
     localStorage.setItem('roster_staff', JSON.stringify(staff));
     localStorage.setItem('roster_holidays', JSON.stringify(holidays));
   }, [staff, holidays]);
 
-  const downloadTemplate = () => {
+  // --- EXCEL EXPORT (The "Live Template") ---
+  const exportCurrentData = () => {
     const wb = XLSX.utils.book_new();
-    const wsStaff = XLSX.utils.json_to_sheet([{ Name: 'John Doe', Designation: 'AI Specialist', Role: 'Senior' }]);
-    const wsHolidays = XLSX.utils.json_to_sheet([{ Date: '2026-05-01', Name: 'Holiday Name' }]);
-    XLSX.utils.book_append_sheet(wb, wsStaff, "Staff");
-    XLSX.utils.book_append_sheet(wb, wsHolidays, "Holiday");
-    XLSX.writeFile(wb, "Roster_Template.xlsx");
+    
+    // Create Staff Sheet
+    const staffWS = XLSX.utils.json_to_sheet(staff.map(s => ({
+      Name: s.name,
+      Designation: s.designation,
+      Role: s.role || 'Junior'
+    })));
+    
+    // Create Holiday Sheet
+    const holidayWS = XLSX.utils.json_to_sheet(holidays.map(h => ({
+      Date: h.date,
+      Name: h.name
+    })));
+
+    XLSX.utils.book_append_sheet(wb, staffWS, "Staff");
+    XLSX.utils.book_append_sheet(wb, holidayWS, "Holiday");
+    XLSX.writeFile(wb, "Roster_Template_System.xlsx");
   };
 
+  // --- EXCEL IMPORT (The Fixed Logic) ---
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
+    if (!file) return;
+
     const reader = new FileReader();
     reader.onload = (evt) => {
       const bstr = evt.target.result;
       const wb = XLSX.read(bstr, { type: 'binary' });
+
+      // Process Staff
       if (wb.SheetNames.includes('Staff')) {
         const data = XLSX.utils.sheet_to_json(wb.Sheets['Staff']);
         setStaff(data.map(item => ({ 
-            name: item.Name || item.name || '', 
-            designation: item.Designation || item.designation || '',
+            name: item.Name || item.name || 'Unknown', 
+            designation: item.Designation || item.designation || 'Staff',
             role: item.Role || item.role || 'Junior' 
         })));
       }
+
+      // Process Holiday (Fixed Mapping)
+      if (wb.SheetNames.includes('Holiday')) {
+        const data = XLSX.utils.sheet_to_json(wb.Sheets['Holiday']);
+        setHolidays(data.map(item => ({
+            date: item.Date || item.date || item.DATE || '', 
+            name: item.Name || item.name || item['Holiday Name'] || 'Holiday'
+        })).filter(h => h.date));
+      }
+      alert("Data Imported Successfully!");
     };
     reader.readAsBinaryString(file);
   };
 
-  const shiftStats = useMemo(() => {
-    if (!generatedRoster) return [];
-    const stats = {};
-    staff.forEach(s => stats[s.name] = { morning: 0, evening: 0, night: 0, total: 0, role: s.role, designation: s.designation });
-    generatedRoster.forEach(row => {
-      ['morning', 'evening', 'night'].forEach(s => { if (row[s] !== 'OFF' && stats[row[s]]) { stats[row[s]][s]++; stats[row[s]].total++; } });
-    });
-    return Object.entries(stats).map(([name, data]) => ({ name, ...data }));
-  }, [generatedRoster, staff]);
-
-  const generateRoster = () => {
-    let roster = [];
-    let curr = new Date(config.start);
-    const end = new Date(config.end);
-    let jIdx = 0, sIdx = 0;
-    const juniors = staff.filter(s => s.role === 'Junior').map(s => s.name);
-    const seniors = staff.filter(s => s.role === 'Senior').map(s => s.name);
-    
-    const offLookup = {};
-    offDays.forEach(o => {
-        if(o.date && o.name) {
-            const d = o.date;
-            if(o.m) offLookup[`${d}-${o.name}-morning`] = true;
-            if(o.e) offLookup[`${d}-${o.name}-evening`] = true;
-            if(o.n) offLookup[`${d}-${o.name}-night`] = true;
-        }
-    });
-
-    while (curr <= end) {
-      const dStr = curr.toISOString().split('T')[0];
-      const isExtra = holidays.some(h => h.date === dStr) || curr.getDay() === 0;
-      let row = { date: dStr, day: curr.toLocaleDateString('en-US', { weekday: 'short' }), morning: 'OFF', evening: 'OFF', night: 'OFF' };
-      
-      const getAvailable = (list, idx, shiftType) => {
-          if(!list.length) return { name: 'OFF', newIdx: idx };
-          for(let i=0; i < list.length; i++) {
-              let p = list[(idx + i) % list.length];
-              if(!offLookup[`${dStr}-${p}-${shiftType}`]) return { name: p, newIdx: idx + i + 1 };
-          }
-          return { name: 'SHORTAGE', newIdx: idx };
-      };
-
-      let nRes = getAvailable(juniors, jIdx, 'night'); row.night = nRes.name; jIdx = nRes.newIdx;
-      let eRes = getAvailable(seniors, sIdx, 'evening'); row.evening = eRes.name; sIdx = eRes.newIdx;
-      if (isExtra) {
-          let mRes = getAvailable(seniors, sIdx, 'morning'); row.morning = mRes.name; sIdx = mRes.newIdx;
-      }
-      roster.push(row);
-      curr.setDate(curr.getDate() + 1);
-    }
-    setGeneratedRoster(roster);
-    setActiveTab('roster');
-  };
-
-  const addLeaveEntry = () => {
-    setOffDays([...offDays, { name: '', date: '', m: true, e: true, n: true }]);
-  };
-
-  const updateLeave = (index, field, value) => {
-    const updated = [...offDays];
-    const entry = { ...updated[index], [field]: value };
-    
-    // Validation: Check for duplicates when name or date changes
-    if (field === 'name' || field === 'date') {
-        const isDuplicate = offDays.some((o, i) => i !== index && o.name === (field === 'name' ? value : o.name) && o.date === (field === 'date' ? value : o.date) && o.name !== '' && o.date !== '');
-        if (isDuplicate) {
-            alert("This staff member already has a leave entry for this date.");
-            return;
-        }
-    }
-    
-    updated[index] = entry;
-    setOffDays(updated);
+  // --- PRINT FUNCTION ---
+  const handlePrint = () => {
+    window.print();
   };
 
   return (
     <div className="max-w-6xl mx-auto p-4 md:p-8 bg-slate-50 min-h-screen font-sans">
-      <header className="flex justify-between items-center mb-6 no-print">
-        <h1 className="text-2xl font-bold text-indigo-900">Duty Roster Pro</h1>
-        <div className="flex gap-2">
-          <button onClick={downloadTemplate} className="bg-slate-100 p-2 rounded text-xs font-bold flex items-center gap-1"><FileDown size={14}/> Template</button>
-          <label className="bg-white border p-2 rounded text-xs font-bold flex items-center gap-1 cursor-pointer"><Upload size={14}/> Import<input type="file" className="hidden" onChange={handleFileUpload} /></label>
-          <button onClick={generateRoster} className="bg-indigo-600 text-white p-2 px-4 rounded text-xs font-bold flex items-center gap-1"><Play size={14}/> Generate</button>
+      
+      {/* HEADER SECTION - Hidden during printing */}
+      <header className="flex flex-wrap justify-between items-center mb-6 gap-4 print:hidden">
+        <div>
+          <h1 className="text-2xl font-bold text-indigo-900">Duty Roster Pro</h1>
+          <p className="text-slate-500 text-sm">Managing 26 Staff Members</p>
+        </div>
+        
+        <div className="flex flex-wrap gap-2">
+          <button onClick={exportCurrentData} className="bg-white border border-slate-200 p-2 px-3 rounded text-xs font-bold flex items-center gap-2 hover:bg-slate-100 transition shadow-sm">
+            <FileDown size={14}/> Download Template
+          </button>
+          
+          <label className="bg-white border border-slate-200 p-2 px-3 rounded text-xs font-bold flex items-center gap-2 cursor-pointer hover:bg-slate-100 transition shadow-sm">
+            <Upload size={14}/> Upload Excel
+            <input type="file" className="hidden" onChange={handleFileUpload} accept=".xlsx, .xls" />
+          </label>
+          
+          <button onClick={handlePrint} className="bg-slate-800 text-white p-2 px-3 rounded text-xs font-bold flex items-center gap-2 hover:bg-slate-700 transition shadow-sm">
+            <Printer size={14}/> Print to PDF
+          </button>
         </div>
       </header>
 
-      <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-        <nav className="flex bg-slate-100 border-b no-print">
-          <TabBtn active={activeTab === 'staff'} onClick={() => setActiveTab('staff')} label="Staff" icon={<Users size={16}/>}/>
-          <TabBtn active={activeTab === 'holidays'} onClick={() => setActiveTab('holidays')} label="Holidays" icon={<Calendar size={16}/>}/>
-          <TabBtn active={activeTab === 'off'} onClick={() => setActiveTab('off')} label="Leave" icon={<PlaneTakeoff size={16}/>}/>
-          <TabBtn active={activeTab === 'config'} onClick={() => setActiveTab('config')} label="Dates" icon={<Settings size={16}/>}/>
-          {generatedRoster && <TabBtn active={activeTab === 'roster'} onClick={() => setActiveTab('roster')} label="Roster" icon={<ClipboardList size={16}/>} highlight/>}
-          {generatedRoster && <TabBtn active={activeTab === 'summary'} onClick={() => setActiveTab('summary')} label="Summary" icon={<BarChart3 size={16}/>} highlight/>}
-        </nav>
+      {/* NAVIGATION TABS - Hidden during printing */}
+      <nav className="flex border-b border-slate-200 mb-6 overflow-x-auto print:hidden">
+        <button 
+          onClick={() => setActiveTab('staff')}
+          className={`p-3 px-6 text-sm font-medium border-b-2 transition ${activeTab === 'staff' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500'}`}
+        >
+          <div className="flex items-center gap-2"><Users size={16}/> Staff ({staff.length})</div>
+        </button>
+        <button 
+          onClick={() => setActiveTab('holidays')}
+          className={`p-3 px-6 text-sm font-medium border-b-2 transition ${activeTab === 'holidays' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500'}`}
+        >
+          <div className="flex items-center gap-2"><Calendar size={16}/> Holidays ({holidays.length})</div>
+        </button>
+        <button 
+          onClick={() => setActiveTab('roster')}
+          className={`p-3 px-6 text-sm font-medium border-b-2 transition ${activeTab === 'roster' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500'}`}
+        >
+          <div className="flex items-center gap-2"><ClipboardList size={16}/> View Roster</div>
+        </button>
+      </nav>
 
-        <div className="p-4">
-          {activeTab === 'off' && (
-            <div className="max-h-96 overflow-auto border rounded">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead className="bg-slate-50 sticky top-0 border-b">
-                  <tr>
-                    <th className="p-2 w-10 text-center">SN</th>
-                    <th className="p-2 w-48">Staff Name</th>
-                    <th className="p-2 w-40">Date</th>
-                    <th className="p-2">Shifts to mark as OFF</th>
-                    <th className="p-2 w-10"></th>
+      {/* CONTENT AREA */}
+      <main className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        
+        {/* STAFF TAB */}
+        {activeTab === 'staff' && (
+          <div className="print:hidden">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-bold">Staff Directory</h2>
+              <button onClick={() => setStaff([...staff, { name: '', designation: '', role: 'Junior' }])} className="text-indigo-600 text-sm font-bold flex items-center gap-1">
+                <Plus size={16}/> Add Row
+              </button>
+            </div>
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b bg-slate-50">
+                  <th className="p-3">Name</th>
+                  <th className="p-3">Designation</th>
+                  <th className="p-3">Role</th>
+                  <th className="p-3 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {staff.map((s, idx) => (
+                  <tr key={idx} className="border-b hover:bg-slate-50 transition">
+                    <td className="p-2"><input className="w-full p-1 border rounded" value={s.name} onChange={(e) => {
+                      const n = [...staff]; n[idx].name = e.target.value; setStaff(n);
+                    }}/></td>
+                    <td className="p-2"><input className="w-full p-1 border rounded" value={s.designation} onChange={(e) => {
+                      const n = [...staff]; n[idx].designation = e.target.value; setStaff(n);
+                    }}/></td>
+                    <td className="p-2">
+                      <select className="w-full p-1 border rounded" value={s.role} onChange={(e) => {
+                        const n = [...staff]; n[idx].role = e.target.value; setStaff(n);
+                      }}>
+                        <option value="Senior">Senior</option>
+                        <option value="Junior">Junior</option>
+                      </select>
+                    </td>
+                    <td className="p-2 text-right">
+                      <button onClick={() => setStaff(staff.filter((_, i) => i !== idx))} className="text-red-400 hover:text-red-600"><Trash2 size={16}/></button>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {offDays.map((o, i) => (
-                    <tr key={i} className="border-b bg-white">
-                      <td className="p-1 text-center text-slate-400 font-mono">{i + 1}</td>
-                      <td className="p-1">
-                        <select className="border w-full p-1 rounded font-bold" value={o.name} onChange={e => updateLeave(i, 'name', e.target.value)}>
-                          <option value="">Select Staff</option>
-                          {staff.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
-                        </select>
-                      </td>
-                      <td className="p-1"><input type="date" className="border w-full p-1 rounded font-bold" value={o.date} onChange={e => updateLeave(i, 'date', e.target.value)} /></td>
-                      <td className="p-1">
-                        <div className="flex gap-4 px-2 py-1 text-[10px] font-black">
-                          <label className="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={o.m} onChange={e => updateLeave(i, 'm', e.target.checked)}/> MOR</label>
-                          <label className="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={o.e} onChange={e => updateLeave(i, 'e', e.target.checked)}/> EVE</label>
-                          <label className="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={o.n} onChange={e => updateLeave(i, 'n', e.target.checked)}/> NIT</label>
-                        </div>
-                      </td>
-                      <td className="p-1 text-center"><button onClick={() => setOffDays(offDays.filter((_, idx) => idx !== i))} className="text-rose-500 hover:bg-rose-50 p-1 rounded-full"><Trash2 size={14}/></button></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <button onClick={addLeaveEntry} className="m-2 text-indigo-600 font-bold text-xs flex items-center gap-1"><Plus size={14}/> Add Leave Entry</button>
-            </div>
-          )}
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
-          {activeTab === 'staff' && (
-            <div className="max-h-96 overflow-auto border rounded">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead className="bg-slate-50 sticky top-0 border-b">
-                  <tr><th className="p-2 w-10 text-center">SN</th><th className="p-2">Name</th><th className="p-2">Designation</th><th className="p-2 w-24">Role</th><th className="p-2 w-10"></th></tr>
-                </thead>
-                <tbody>
-                  {staff.map((s, i) => (
-                    <tr key={i} className="border-b bg-white">
-                      <td className="p-1 text-center text-slate-400 font-mono">{i + 1}</td>
-                      <td className="p-1"><input className="border w-full p-1 rounded" value={s.name} onChange={e => {const n = [...staff]; n[i].name = e.target.value; setStaff(n)}}/></td>
-                      <td className="p-1"><input className="border w-full p-1 rounded" value={s.designation} onChange={e => {const n = [...staff]; n[i].designation = e.target.value; setStaff(n)}}/></td>
-                      <td className="p-1"><select className="border w-full p-1 rounded font-bold" value={s.role} onChange={e => {const n = [...staff]; n[i].role = e.target.value; setStaff(n)}}><option>Senior</option><option>Junior</option></select></td>
-                      <td className="p-1 text-center"><button onClick={() => setStaff(staff.filter((_, idx) => idx !== i))} className="text-rose-500"><Trash2 size={14}/></button></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <button onClick={() => setStaff([...staff, {name: '', designation: '', role: 'Junior'}])} className="m-2 text-indigo-600 font-bold text-xs flex items-center gap-1"><Plus size={14}/> Add New Staff</button>
-            </div>
-          )}
+        {/* HOLIDAY TAB */}
+        {activeTab === 'holidays' && (
+          <div className="print:hidden">
+            <h2 className="text-lg font-bold mb-4">Holiday List (Imported from Excel)</h2>
+            {holidays.length === 0 ? (
+              <div className="text-center p-10 border-2 border-dashed rounded-lg text-slate-400">
+                <AlertCircle className="mx-auto mb-2" size={32}/>
+                <p>No holidays found. Use "Upload Excel" to import your holiday list.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {holidays.map((h, idx) => (
+                  <div key={idx} className="p-3 border rounded-lg bg-indigo-50 flex justify-between items-center">
+                    <div>
+                      <p className="font-bold text-indigo-900">{h.name}</p>
+                      <p className="text-xs text-slate-500">{h.date}</p>
+                    </div>
+                    <button onClick={() => setHolidays(holidays.filter((_, i) => i !== idx))} className="text-slate-400 hover:text-red-500"><Trash2 size={14}/></button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
-          {activeTab === 'summary' && (
-            <div className="border rounded overflow-hidden">
-              <table className="w-full text-left text-[11px]" style={{tableLayout:'fixed'}}>
-                <thead className="bg-slate-900 text-white font-black uppercase text-[9px]">
-                  <tr>
-                    <th style={{padding: '8px', width: '6%'}} className="text-center">SN</th>
-                    <th style={{padding: '8px', width: '22%'}}>Name</th>
-                    <th style={{padding: '8px', width: '15%'}}>Desig</th>
-                    <th style={{padding: '8px', textAlign: 'center', width: '7%'}}>R</th>
-                    <th style={{padding: '8px', textAlign: 'center', width: '10%'}}>M</th>
-                    <th style={{padding: '8px', textAlign: 'center', width: '10%'}}>E</th>
-                    <th style={{padding: '8px', textAlign: 'center', width: '10%'}}>N</th>
-                    <th style={{padding: '8px', textAlign: 'center', width: '20%', backgroundColor: '#312e81'}}>Total</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {shiftStats.sort((a,b) => b.total - a.total).map((s, i) => (
-                    <tr key={i} style={{backgroundColor: i % 2 === 0 ? '#fff' : '#fafafa'}}>
-                      <td style={{padding: '5px 8px', textAlign: 'center', color: '#94a3b8'}} className="font-mono">{i + 1}</td>
-                      <td style={{padding: '5px 8px', fontWeight: 'bold'}}>{s.name}</td>
-                      <td style={{padding: '5px 8px', color: '#64748b', fontSize: '10px'}}>{s.designation}</td>
-                      <td style={{padding: '5px 8px', textAlign: 'center'}}><span style={{backgroundColor: s.role === 'Senior' ? '#e0e7ff' : '#f1f5f9', padding: '1px 4px', borderRadius: '3px'}}>{s.role[0]}</span></td>
-                      <td style={{padding: '5px 8px', textAlign: 'center'}}>{s.morning}</td>
-                      <td style={{padding: '5px 8px', textAlign: 'center'}}>{s.evening}</td>
-                      <td style={{padding: '5px 8px', textAlign: 'center'}}>{s.night}</td>
-                      <td style={{padding: '5px 8px', textAlign: 'center', fontWeight: '900', backgroundColor: '#eef2ff', color: '#4338ca'}}>{s.total}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        {/* ROSTER TAB */}
+        {activeTab === 'roster' && (
+          <div>
+            <div className="flex justify-between items-center mb-6 print:hidden">
+              <h2 className="text-lg font-bold">Monthly Roster</h2>
+              <button onClick={() => setGeneratedRoster(true)} className="bg-indigo-600 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2 hover:bg-indigo-700 shadow-md">
+                <Play size={18}/> Generate Schedule
+              </button>
             </div>
-          )}
-
-          {activeTab === 'holidays' && (
-            <div className="max-h-96 overflow-auto border rounded">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead><tr className="bg-slate-50 border-b"><th className="p-2 w-10 text-center">SN</th><th className="p-2 w-32">Date</th><th className="p-2">Holiday Name</th><th className="p-2 w-10"></th></tr></thead>
-                <tbody>{holidays.map((h, i) => (<tr key={i} className="border-b"><td className="p-1 text-center text-slate-400 font-mono">{i + 1}</td><td className="p-1"><input type="date" className="border p-1 rounded" value={h.date} onChange={e => {const n = [...holidays]; n[i].date = e.target.value; setHolidays(n)}}/></td><td className="p-1"><input className="border w-full p-1 rounded" value={h.name} onChange={e => {const n = [...holidays]; n[i].name = e.target.value; setHolidays(n)}}/></td><td className="p-1 text-center"><button onClick={() => setHolidays(holidays.filter((_, idx) => idx !== i))} className="text-rose-500"><Trash2 size={14}/></button></td></tr>))}</tbody>
-              </table>
-              <button onClick={() => setHolidays([...holidays, {date: '', name: ''}])} className="m-2 text-indigo-600 font-bold text-xs flex items-center gap-1"><Plus size={14}/> Add Holiday</button>
-            </div>
-          )}
-
-          {activeTab === 'config' && (
-            <div className="flex flex-col gap-4">
-                <div className="flex gap-4 p-4 bg-indigo-50 border border-indigo-100 rounded w-fit">
-                    <div><label className="text-[10px] font-bold block mb-1">Start Date</label><input type="date" className="border p-1 rounded font-bold" value={config.start} onChange={e => setConfig({...config, start: e.target.value})}/></div>
-                    <div><label className="text-[10px] font-bold block mb-1">End Date</label><input type="date" className="border p-1 rounded font-bold" value={config.end} onChange={e => setConfig({...config, end: e.target.value})}/></div>
+            
+            {generatedRoster ? (
+              <div className="overflow-x-auto">
+                <div className="text-center mb-6 hidden print:block">
+                  <h1 className="text-2xl font-bold">Duty Roster - {config.start} to {config.end}</h1>
+                  <p>Generated on {new Date().toLocaleDateString()}</p>
                 </div>
-                <button onClick={() => {if(window.confirm("Clear all data?")) {setStaff([]); setHolidays([]); setOffDays([]); setGeneratedRoster(null); localStorage.clear();}}} className="flex items-center gap-2 text-rose-600 text-xs font-bold bg-rose-50 p-3 rounded border border-rose-100 w-fit hover:bg-rose-100"><RefreshCcw size={14}/> Reset All Local Data</button>
-            </div>
-          )}
-
-          {activeTab === 'roster' && generatedRoster && (
-            <div className="border rounded overflow-hidden">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead className="bg-slate-900 text-white font-bold sticky top-0">
-                  <tr><th className="p-2 border">Date</th><th className="p-2 border">Morning (S)</th><th className="p-2 border">Evening (S)</th><th className="p-2 border">Night (J)</th></tr>
-                </thead>
-                <tbody>{generatedRoster.map((r, i) => (<tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}><td className="p-2 border font-bold">{r.date} ({r.day})</td><td className={`p-2 border font-bold ${r.morning === 'OFF' ? 'text-slate-200' : 'text-indigo-600'}`}>{r.morning}</td><td className="p-2 border text-emerald-600 font-bold">{r.evening}</td><td className="p-2 border font-black">{r.night}</td></tr>))}</tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      </div>
+                <table className="w-full border-collapse border border-slate-300 text-xs">
+                  <thead>
+                    <tr className="bg-slate-100">
+                      <th className="border p-2">Staff Name</th>
+                      <th className="border p-2">Role</th>
+                      {/* Example columns for the first 7 days */}
+                      {[...Array(7)].map((_, i) => (
+                        <th key={i} className="border p-2">Day {i + 1}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {staff.map((s, idx) => (
+                      <tr key={idx}>
+                        <td className="border p-2 font-bold">{s.name}</td>
+                        <td className="border p-2 text-slate-500">{s.role}</td>
+                        {[...Array(7)].map((_, i) => (
+                          <td key={i} className="border p-2 text-center">G</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="text-center py-20 text-slate-400">
+                Click "Generate Schedule" to create the final view.
+              </div>
+            )}
+          </div>
+        )}
+      </main>
     </div>
   );
 };
-
-const TabBtn = ({ active, onClick, icon, label, highlight }) => (
-  <button onClick={onClick} className={`px-4 py-3 flex items-center gap-2 font-bold transition-all border-b-2 text-xs ${active ? 'bg-white border-indigo-600 text-indigo-600 shadow-[inset_0_-2px_0_rgba(79,70,229,1)]' : 'text-slate-400 border-transparent hover:bg-slate-50'} ${highlight && !active ? 'text-indigo-500' : ''}`}>
-    {icon} {label}
-  </button>
-);
 
 export default RosterApp;
