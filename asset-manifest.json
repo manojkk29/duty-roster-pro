@@ -1,14 +1,14 @@
 {
   "files": {
     "main.css": "/duty-roster-pro/static/css/main.e6c13ad2.css",
-    "main.js": "/duty-roster-pro/static/js/main.0e223bdc.js",
+    "main.js": "/duty-roster-pro/static/js/main.c150df33.js",
     "static/js/239.6de21888.chunk.js": "/duty-roster-pro/static/js/239.6de21888.chunk.js",
     "static/js/977.f67b1b7a.chunk.js": "/duty-roster-pro/static/js/977.f67b1b7a.chunk.js",
     "static/js/732.2fd50826.chunk.js": "/duty-roster-pro/static/js/732.2fd50826.chunk.js",
     "static/js/453.40696308.chunk.js": "/duty-roster-pro/static/js/453.40696308.chunk.js",
     "index.html": "/duty-roster-pro/index.html",
     "main.e6c13ad2.css.map": "/duty-roster-pro/static/css/main.e6c13ad2.css.map",
-    "main.0e223bdc.js.map": "/duty-roster-pro/static/js/main.0e223bdc.js.map",
+    "main.c150df33.js.map": "/duty-roster-pro/static/js/main.c150df33.js.map",
     "239.6de21888.chunk.js.map": "/duty-roster-pro/static/js/239.6de21888.chunk.js.map",
     "977.f67b1b7a.chunk.js.map": "/duty-roster-pro/static/js/977.f67b1b7a.chunk.js.map",
     "732.2fd50826.chunk.js.map": "/duty-roster-pro/static/js/732.2fd50826.chunk.js.map",
@@ -16,6 +16,6 @@
   },
   "entrypoints": [
     "static/css/main.e6c13ad2.css",
-    "static/js/main.0e223bdc.js"
+    "static/js/main.c150df33.js"
   ]
 }
